@@ -1,7 +1,19 @@
 import numpy as np
 import joblib
+from pathlib import Path
+
+# BASE_DIR always points to the project root (two levels up from src/)
+BASE_DIR = Path(__file__).resolve().parent.parent
+
 from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import accuracy_score, classification_report, confusion_matrix
+from sklearn.metrics import (
+    accuracy_score,
+    classification_report,
+    confusion_matrix,
+    mean_squared_error,
+    mean_absolute_error,
+    r2_score,
+)
 
 # Import our custom preprocessing pipeline
 from preprocess import preprocess_data
@@ -59,8 +71,8 @@ def train_model():
     # We use joblib.dump() to serialize the model object to 'model.pkl'.
     # This file will be loaded later by the Streamlit app for predictions.
     # ------------------------------------------------------------------
-    joblib.dump(model, "model.pkl")
-    print("Trained model saved to 'model.pkl' ✓")
+    joblib.dump(model, BASE_DIR / "models" / "model.pkl")
+    print(f"Trained model saved to '{BASE_DIR / 'models' / 'model.pkl'}' ✓")
 
     return model
 
@@ -114,8 +126,8 @@ def predict_risk(input_data: dict):
     """
 
     # Load the saved model and scaler from disk
-    model = joblib.load("model.pkl")
-    scaler = joblib.load("scaler.pkl")
+    model  = joblib.load(BASE_DIR / "models" / "model.pkl")
+    scaler = joblib.load(BASE_DIR / "models" / "scaler.pkl")
 
     # Convert the input dictionary to a numpy array in the correct column order
     raw_values = np.array([[input_data[col] for col in FEATURE_COLUMNS]])
@@ -128,6 +140,93 @@ def predict_risk(input_data: dict):
     probability = float(model.predict_proba(scaled_values)[0][1])
 
     return prediction, probability
+
+
+# ------------------------------------------------------------------
+# evaluate_dataset(X_scaled, y_true)
+# Runs batch predictions on a pre-scaled feature matrix.
+# Used by app.py after a user uploads a multi-row CSV/Excel file.
+# Accepts scaled input from preprocess_uploaded_data() and returns
+# predictions, probability scores, and evaluation metrics (if ground-truth
+# labels are provided).  All metric values are None when y_true is None.
+# ------------------------------------------------------------------
+def evaluate_dataset(X_scaled, y_true):
+    """
+    Evaluates the trained model on a batch of pre-scaled patient records.
+
+    Parameters
+    ----------
+    X_scaled : np.ndarray
+        Feature matrix already scaled by the same scaler used during training.
+    y_true : pandas.Series, np.ndarray, or None
+        Ground-truth Outcome labels (0/1).  Pass None if unavailable.
+
+    Returns
+    -------
+    dict with keys:
+        predictions       — np.ndarray of 0/1 class labels
+        probabilities     — np.ndarray of float risk scores (0.0–1.0)
+        accuracy          — float or None
+        rmse              — float or None
+        mae               — float or None
+        r2                — float or None
+        metrics_available — bool
+    """
+
+    # ------------------------------------------------------------------
+    # STEP 1 — Load the saved trained model from disk
+    # ------------------------------------------------------------------
+    model = joblib.load(BASE_DIR / "models" / "model.pkl")
+
+    # ------------------------------------------------------------------
+    # STEP 2 — Generate predictions and probability scores for every row
+    # y_pred  → class label per patient (0 = No Diabetes, 1 = Diabetes)
+    # y_prob  → probability of being diabetic (positive class, index 1)
+    # ------------------------------------------------------------------
+    y_pred = model.predict(X_scaled)
+    y_prob = model.predict_proba(X_scaled)[:, 1]
+
+    # ------------------------------------------------------------------
+    # STEP 3 — Calculate evaluation metrics (only when true labels exist)
+    # We compute four complementary metrics:
+    #   • Accuracy — overall fraction of correct predictions
+    #   • RMSE     — penalises large errors more than small ones
+    #   • MAE      — average absolute error (easy to interpret)
+    #   • R²       — proportion of variance explained by the model
+    # ------------------------------------------------------------------
+    if y_true is not None:
+        accuracy = accuracy_score(y_true, y_pred)
+
+        # RMSE — compatible with both older and newer scikit-learn versions
+        try:
+            rmse = mean_squared_error(y_true, y_pred, squared=False)
+        except TypeError:
+            # scikit-learn >= 1.4 removed the 'squared' parameter
+            rmse = float(np.sqrt(mean_squared_error(y_true, y_pred)))
+
+        mae = mean_absolute_error(y_true, y_pred)
+        r2  = r2_score(y_true, y_pred)
+        metrics_available = True
+    else:
+        # No ground-truth labels supplied — metrics cannot be computed
+        accuracy = None
+        rmse     = None
+        mae      = None
+        r2       = None
+        metrics_available = False
+
+    # ------------------------------------------------------------------
+    # STEP 4 — Return a structured dictionary of results
+    # ------------------------------------------------------------------
+    return {
+        "predictions":       y_pred,
+        "probabilities":     y_prob,
+        "accuracy":          accuracy,
+        "rmse":              rmse,
+        "mae":               mae,
+        "r2":                r2,
+        "metrics_available": metrics_available,
+    }
 
 
 # ------------------------------------------------------------------
