@@ -30,6 +30,46 @@ Users can either **upload their own patient dataset** (CSV or Excel) or use one 
 
 ---
 
+
+---
+
+## 🗺️ Milestones & Deliverables
+
+### Milestone 1 — ML-Based Risk Assessment *(Mid-Semester)* ✅
+**Objective:** Design and implement a machine learning–based healthcare analytics system that predicts patient health risks using structured clinical data, without the use of LLMs.
+
+| Deliverable | Status |
+|---|---|
+| Problem understanding & use case description | ✅ Complete |
+| Input–output specification | ✅ Complete |
+| System architecture | ✅ Complete |
+| ML model implementation (`preprocess.py`, `model.py`) | ✅ Complete |
+| Working deployed application with UI | ✅ Complete |
+| Model evaluation report (Accuracy, F1, RMSE, MAE, R²) | ✅ Complete |
+
+### Milestone 2 — Agentic AI Health Support Assistant *(End-Semester)* 🔄
+**Objective:** Extend the system into an agent-based AI application that autonomously reasons about patient risk profiles, retrieves medical guidelines (RAG), and generates structured health recommendations.
+
+| Deliverable | Status |
+|---|---|
+| LangGraph agent workflow implementation | 🔄 Upcoming |
+| RAG pipeline with vector DB (Chroma/FAISS) | 🔄 Upcoming |
+| Structured health report generation | 🔄 Upcoming |
+| Publicly deployed application | 🔄 Upcoming |
+| Agent workflow documentation | 🔄 Upcoming |
+| GitHub repository & complete codebase | ✅ Complete |
+| Demo video (max 5 mins) | 🔄 Upcoming |
+
+---
+
+## 📊 Evaluation Criteria
+
+| Phase | Weight | Criteria |
+| :--- | :--- | :--- |
+| **Mid-Sem (Milestone 1)** | 25% | Correct application of ML concepts · Quality of data preprocessing & feature selection · Model performance & evaluation metrics · Code modularity & UI usability |
+| **End-Sem (Milestone 2)** | 30% | Quality & reliability of agent reasoning · Correct RAG implementation & state management · Clarity & structure of health reports · Ethical responsible AI & deployment success |
+
+
 ## 🌐 Live Demo
 
 🔗 **[https://patient-risk-assessment-pngmjqymiun8h3fvblgek7.streamlit.app/](https://patient-risk-assessment-pngmjqymiun8h3fvblgek7.streamlit.app/)**
