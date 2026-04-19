@@ -47,9 +47,42 @@ st.markdown(
             color: var(--deep-text);
         }
 
+        .stApp,
+        .stApp p,
+        .stApp span,
+        .stApp label,
+        .stApp div,
+        .stApp h1,
+        .stApp h2,
+        .stApp h3,
+        .stApp h4,
+        .stApp h5,
+        .stApp h6 {
+            color: var(--deep-text);
+        }
+
+        [data-testid="stMarkdownContainer"] p,
+        [data-testid="stMarkdownContainer"] li,
+        [data-testid="stMarkdownContainer"] span {
+            color: var(--deep-text);
+        }
+
         section[data-testid="stSidebar"] {
             background: #f8fbff;
             border-right: 1px solid var(--soft-border);
+        }
+
+        section[data-testid="stSidebar"] * {
+            color: var(--deep-text);
+        }
+
+        section[data-testid="stSidebar"] [role="radiogroup"] label {
+            background: #ffffff;
+            border: 1px solid var(--soft-border);
+            border-radius: 8px;
+            padding: 0.55rem 0.7rem;
+            margin-bottom: 0.4rem;
+            box-shadow: 0 3px 12px rgba(23, 32, 51, 0.05);
         }
 
         .main .block-container {
@@ -88,6 +121,7 @@ st.markdown(
             padding: 1rem;
             box-shadow: 0 8px 22px rgba(23, 32, 51, 0.08);
             margin-bottom: 1rem;
+            color: var(--deep-text);
         }
 
         .metric-card {
@@ -98,24 +132,25 @@ st.markdown(
             padding: 1rem;
             min-height: 116px;
             box-shadow: 0 8px 22px rgba(23, 32, 51, 0.08);
+            color: var(--deep-text);
         }
 
         .metric-label {
-            color: var(--muted-text);
+            color: var(--muted-text) !important;
             font-size: 0.88rem;
             font-weight: 700;
             margin-bottom: 0.35rem;
         }
 
         .metric-value {
-            color: var(--deep-text);
+            color: var(--deep-text) !important;
             font-size: 1.75rem;
             font-weight: 800;
             line-height: 1.2;
         }
 
         .metric-caption {
-            color: var(--muted-text);
+            color: var(--muted-text) !important;
             font-size: 0.78rem;
             margin-top: 0.35rem;
         }
@@ -134,19 +169,57 @@ st.markdown(
         }
 
         div[data-testid="stTabs"] button {
+            background: #ffffff;
+            color: var(--deep-text);
             font-weight: 700;
+            border-radius: 8px 8px 0 0;
+        }
+
+        div[data-testid="stTabs"] button[aria-selected="true"] {
+            color: var(--primary-blue);
+            border-bottom: 3px solid var(--primary-blue);
+        }
+
+        div[data-baseweb="select"] > div,
+        div[data-testid="stExpander"] details,
+        div[data-testid="stExpander"] summary {
+            background: #ffffff;
+            color: var(--deep-text);
+            border-color: var(--soft-border);
+        }
+
+        div[data-testid="stExpander"] * {
+            color: var(--deep-text);
         }
 
         div[data-testid="stDownloadButton"] button,
         div[data-testid="stButton"] button {
+            background: var(--primary-blue);
+            color: #ffffff !important;
             border-radius: 8px;
             border: 1px solid var(--primary-blue);
+            font-weight: 800;
+        }
+
+        div[data-testid="stDownloadButton"] button p,
+        div[data-testid="stButton"] button p {
+            color: #ffffff !important;
         }
 
         div[data-testid="stDataFrame"] {
+            background: #ffffff;
             border: 1px solid var(--soft-border);
             border-radius: 8px;
             box-shadow: 0 8px 22px rgba(23, 32, 51, 0.06);
+        }
+
+        div[data-testid="stAlert"] {
+            border-radius: 8px;
+            border: 1px solid var(--soft-border);
+        }
+
+        div[data-testid="stAlert"] * {
+            color: var(--deep-text);
         }
     </style>
     """,
