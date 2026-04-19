@@ -1,4 +1,5 @@
 import sys
+import textwrap
 from pathlib import Path
 
 # Ensure Python always finds model.py and preprocess.py in the same src/ folder,
@@ -309,6 +310,157 @@ def style_risk_badges(df):
     return df.style.map(style_risk_column, subset=["Risk Level"])
 
 
+def _pdf_escape(text):
+    return str(text).replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
+
+
+def _build_pdf_lines(report, patient_number):
+    recommendations = report.get("recommendations", {})
+    lifestyle_items = recommendations.get("lifestyle", [])
+    if isinstance(lifestyle_items, str):
+        lifestyle_items = [lifestyle_items]
+
+    risk_factors = report.get("key_risk_factors", report.get("risk_factors", []))
+    if isinstance(risk_factors, str):
+        risk_factors = [risk_factors]
+
+    sources = report.get("guideline_sources", [])
+    if isinstance(sources, str):
+        sources = [sources]
+
+    sections = [
+        ("AI HEALTH REPORT", []),
+        ("Patient", [f"Patient {patient_number}"]),
+        (
+            "Risk Summary",
+            [
+                f"Risk Level: {report.get('risk_level', 'Not available')}",
+                f"Risk Probability: {report.get('risk_probability_pct', 'Not available')}",
+            ],
+        ),
+        ("Key Risk Factors", [f"- {factor}" for factor in risk_factors]),
+        ("Clinical Analysis", [report.get("risk_explanation", "No clinical analysis was returned.")]),
+        ("Lifestyle Recommendations", [f"- {item}" for item in lifestyle_items]),
+        (
+            "Medication Note",
+            [recommendations.get("medication_note", "No medication note was returned.")],
+        ),
+        (
+            "Follow-up",
+            [recommendations.get("follow_up", "No follow-up guidance was returned.")],
+        ),
+        ("Medical Guideline Sources Used", [f"- {source}" for source in sources]),
+        (
+            "Disclaimer",
+            [
+                report.get(
+                    "disclaimer",
+                    "This AI report is educational and is not a substitute for professional medical advice.",
+                )
+            ],
+        ),
+    ]
+
+    lines = []
+    for heading, body_lines in sections:
+        lines.append(("heading", heading))
+        for body_line in body_lines:
+            wrapped_lines = textwrap.wrap(str(body_line), width=92) or [""]
+            for wrapped_line in wrapped_lines:
+                lines.append(("body", wrapped_line))
+        lines.append(("space", ""))
+
+    return lines
+
+
+def create_health_report_pdf(report, patient_number):
+    """
+    Creates a simple text-based PDF without extra dependencies.
+    Streamlit can download the returned bytes directly.
+    """
+
+    lines = _build_pdf_lines(report, patient_number)
+    pages = []
+    current_page = []
+    y_position = 760
+
+    for line_type, text in lines:
+        if y_position < 55:
+            pages.append(current_page)
+            current_page = []
+            y_position = 760
+
+        if line_type == "heading":
+            font = "/F1 14 Tf"
+            leading = 20
+        elif line_type == "space":
+            y_position -= 10
+            continue
+        else:
+            font = "/F2 10 Tf"
+            leading = 14
+
+        current_page.append(f"BT {font} 50 {y_position} Td ({_pdf_escape(text)}) Tj ET")
+        y_position -= leading
+
+    if current_page:
+        pages.append(current_page)
+
+    objects = [
+        b"<< /Type /Catalog /Pages 2 0 R >>",
+        None,
+        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>",
+        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+    ]
+
+    page_object_refs = []
+    for page_lines in pages:
+        stream = "\n".join(page_lines).encode("latin-1", errors="replace")
+        content_obj_num = len(objects) + 1
+        page_obj_num = len(objects) + 2
+        objects.append(
+            b"<< /Length "
+            + str(len(stream)).encode("ascii")
+            + b" >>\nstream\n"
+            + stream
+            + b"\nendstream"
+        )
+        objects.append(
+            (
+                f"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] "
+                f"/Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> "
+                f"/Contents {content_obj_num} 0 R >>"
+            ).encode("ascii")
+        )
+        page_object_refs.append(f"{page_obj_num} 0 R")
+
+    objects[1] = (
+        f"<< /Type /Pages /Kids [{' '.join(page_object_refs)}] /Count {len(page_object_refs)} >>"
+    ).encode("ascii")
+
+    pdf = bytearray(b"%PDF-1.4\n")
+    offsets = [0]
+    for object_number, obj in enumerate(objects, start=1):
+        offsets.append(len(pdf))
+        pdf.extend(f"{object_number} 0 obj\n".encode("ascii"))
+        pdf.extend(obj)
+        pdf.extend(b"\nendobj\n")
+
+    xref_offset = len(pdf)
+    pdf.extend(f"xref\n0 {len(objects) + 1}\n".encode("ascii"))
+    pdf.extend(b"0000000000 65535 f \n")
+    for offset in offsets[1:]:
+        pdf.extend(f"{offset:010d} 00000 n \n".encode("ascii"))
+
+    pdf.extend(
+        (
+            f"trailer\n<< /Size {len(objects) + 1} /Root 1 0 R >>\n"
+            f"startxref\n{xref_offset}\n%%EOF\n"
+        ).encode("ascii")
+    )
+    return bytes(pdf)
+
+
 def render_glucose_distribution(df):
     fig, ax = plt.subplots(figsize=(7, 4))
     ax.hist(df["Glucose"], bins=20, color="#1a73e8", edgecolor="white")
@@ -523,7 +675,6 @@ with tab2:
 with tab3:
     st.subheader("Agentic Analysis")
 
-    import json
     import os
 
     predictions_df = st.session_state.get("predictions_df")
@@ -711,9 +862,10 @@ with tab3:
 
             st.error(report.get("disclaimer", "This AI report is educational and is not a substitute for professional medical advice."))
 
+            pdf_bytes = create_health_report_pdf(report, selected_patient_idx + 1)
             st.download_button(
-                "⬇️ Download Full Report (JSON)",
-                data=json.dumps(report, indent=2),
-                file_name=f"health_report_patient_{selected_patient_idx + 1}.json",
-                mime="application/json",
+                "⬇️ Download Full Report (PDF)",
+                data=pdf_bytes,
+                file_name=f"health_report_patient_{selected_patient_idx + 1}.pdf",
+                mime="application/pdf",
             )
