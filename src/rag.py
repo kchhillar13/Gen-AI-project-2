@@ -1,9 +1,8 @@
 from pathlib import Path
 from typing import List
 
-import chromadb
-from chromadb import Documents, EmbeddingFunction, Embeddings
 from sklearn.feature_extraction.text import HashingVectorizer
+from sklearn.metrics.pairwise import cosine_similarity
 
 
 # BASE_DIR always points to the project root (one level up from src/)
@@ -84,7 +83,7 @@ DIABETES_GUIDELINES = [
 ]
 
 
-class LocalHashEmbeddingFunction(EmbeddingFunction):
+class LocalHashEmbeddingFunction:
     """
     Small local embedding function for ChromaDB.
 
@@ -100,7 +99,7 @@ class LocalHashEmbeddingFunction(EmbeddingFunction):
             stop_words="english",
         )
 
-    def __call__(self, input: Documents) -> Embeddings:
+    def __call__(self, input):
         vectors = self.vectorizer.transform(input)
         return vectors.toarray().astype("float32").tolist()
 
@@ -113,6 +112,8 @@ def get_guideline_collection():
     Creates or loads the persistent diabetes guideline vector collection.
     The store is saved in ./chroma_db/ at the project root.
     """
+
+    import chromadb
 
     client = chromadb.PersistentClient(path=str(CHROMA_DIR))
     collection = client.get_or_create_collection(
@@ -138,6 +139,31 @@ def get_guideline_collection():
     return collection
 
 
+def _format_guideline_chunk(text: str, source: str) -> str:
+    return f"{source}: {text}"
+
+
+def retrieve_guidelines_locally(query: str, top_k: int = 3) -> List[str]:
+    """
+    Fallback retriever used when ChromaDB is unavailable in deployment.
+    It uses the same local hashing vectorizer, but keeps everything in memory.
+    """
+
+    documents = [item["text"] for item in DIABETES_GUIDELINES]
+    query_vector = embedding_function.vectorizer.transform([query])
+    document_vectors = embedding_function.vectorizer.transform(documents)
+    scores = cosine_similarity(query_vector, document_vectors)[0]
+    ranked_indices = scores.argsort()[::-1][:top_k]
+
+    return [
+        _format_guideline_chunk(
+            DIABETES_GUIDELINES[index]["text"],
+            DIABETES_GUIDELINES[index]["source"],
+        )
+        for index in ranked_indices
+    ]
+
+
 def retrieve_guidelines(query: str, top_k: int = 3) -> List[str]:
     """
     Retrieves the most relevant hardcoded diabetes guideline chunks.
@@ -155,18 +181,26 @@ def retrieve_guidelines(query: str, top_k: int = 3) -> List[str]:
         Relevant guideline chunks with source labels.
     """
 
-    collection = get_guideline_collection()
-    results = collection.query(query_texts=[query], n_results=top_k)
+    try:
+        collection = get_guideline_collection()
+        results = collection.query(query_texts=[query], n_results=top_k)
 
-    documents = results.get("documents", [[]])[0]
-    metadatas = results.get("metadatas", [[]])[0]
+        documents = results.get("documents", [[]])[0]
+        metadatas = results.get("metadatas", [[]])[0]
 
-    guideline_chunks = []
-    for document, metadata in zip(documents, metadatas):
-        source = metadata.get("source", "Medical guideline")
-        guideline_chunks.append(f"{source}: {document}")
+        guideline_chunks = []
+        for document, metadata in zip(documents, metadatas):
+            source = metadata.get("source", "Medical guideline")
+            guideline_chunks.append(_format_guideline_chunk(document, source))
 
-    return guideline_chunks
+        if guideline_chunks:
+            return guideline_chunks
+    except Exception:
+        # Streamlit Cloud can occasionally have ChromaDB/protobuf dependency
+        # conflicts. Keep the agent available with deterministic local retrieval.
+        pass
+
+    return retrieve_guidelines_locally(query, top_k=top_k)
 
 
 if __name__ == "__main__":
