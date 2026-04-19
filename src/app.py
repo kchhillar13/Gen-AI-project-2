@@ -1,3 +1,4 @@
+import html
 import sys
 import textwrap
 from pathlib import Path
@@ -310,8 +311,21 @@ def style_risk_badges(df):
     return df.style.map(style_risk_column, subset=["Risk Level"])
 
 
+def safe_text(value):
+    """
+    Removes invalid Unicode surrogates from model-generated text before it is
+    sent to Streamlit or encoded into the downloadable PDF.
+    """
+
+    return str(value).encode("utf-8", errors="replace").decode("utf-8")
+
+
+def safe_html(value):
+    return html.escape(safe_text(value))
+
+
 def _pdf_escape(text):
-    return str(text).replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
+    return safe_text(text).replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
 
 
 def _build_pdf_lines(report, patient_number):
@@ -334,28 +348,30 @@ def _build_pdf_lines(report, patient_number):
         (
             "Risk Summary",
             [
-                f"Risk Level: {report.get('risk_level', 'Not available')}",
-                f"Risk Probability: {report.get('risk_probability_pct', 'Not available')}",
+                f"Risk Level: {safe_text(report.get('risk_level', 'Not available'))}",
+                f"Risk Probability: {safe_text(report.get('risk_probability_pct', 'Not available'))}",
             ],
         ),
-        ("Key Risk Factors", [f"- {factor}" for factor in risk_factors]),
-        ("Clinical Analysis", [report.get("risk_explanation", "No clinical analysis was returned.")]),
-        ("Lifestyle Recommendations", [f"- {item}" for item in lifestyle_items]),
+        ("Key Risk Factors", [f"- {safe_text(factor)}" for factor in risk_factors]),
+        ("Clinical Analysis", [safe_text(report.get("risk_explanation", "No clinical analysis was returned."))]),
+        ("Lifestyle Recommendations", [f"- {safe_text(item)}" for item in lifestyle_items]),
         (
             "Medication Note",
-            [recommendations.get("medication_note", "No medication note was returned.")],
+            [safe_text(recommendations.get("medication_note", "No medication note was returned."))],
         ),
         (
             "Follow-up",
-            [recommendations.get("follow_up", "No follow-up guidance was returned.")],
+            [safe_text(recommendations.get("follow_up", "No follow-up guidance was returned."))],
         ),
-        ("Medical Guideline Sources Used", [f"- {source}" for source in sources]),
+        ("Medical Guideline Sources Used", [f"- {safe_text(source)}" for source in sources]),
         (
             "Disclaimer",
             [
-                report.get(
-                    "disclaimer",
-                    "This AI report is educational and is not a substitute for professional medical advice.",
+                safe_text(
+                    report.get(
+                        "disclaimer",
+                        "This AI report is educational and is not a substitute for professional medical advice.",
+                    )
                 )
             ],
         ),
@@ -779,7 +795,10 @@ with tab3:
                 "risk_probability_pct",
                 format_probability(selected_patient.get("Risk Probability %")),
             )
-            risk_level_text = str(risk_level)
+            risk_level_text = safe_text(risk_level)
+            risk_probability_pct_text = safe_text(risk_probability_pct)
+            risk_level_html = safe_html(risk_level_text)
+            risk_probability_pct_html = safe_html(risk_probability_pct_text)
 
             if "High" in risk_level_text:
                 banner_bg = "#fde7e9"
@@ -807,7 +826,7 @@ with tab3:
                 ">
                     <div style="font-size: 0.95rem; font-weight: 700;">Risk Assessment</div>
                     <div style="font-size: 2rem; font-weight: 800; line-height: 1.2;">
-                        {risk_level_text} · {risk_probability_pct}
+                        {risk_level_html} · {risk_probability_pct_html}
                     </div>
                 </div>
                 """,
@@ -821,21 +840,22 @@ with tab3:
             factor_cols = st.columns(3)
             for card_idx in range(3):
                 factor_text = risk_factors[card_idx] if card_idx < len(risk_factors) else "Not specified"
+                factor_text_html = safe_html(factor_text)
                 with factor_cols[card_idx]:
                     st.markdown(
                         f"""
                         <div class="metric-card">
-                            <div class="metric-label">⚠️ Risk Factor {card_idx + 1}</div>
-                            <div style="color: #172033; font-size: 1rem; font-weight: 700; line-height: 1.45;">
-                                {factor_text}
-                            </div>
+	                            <div class="metric-label">⚠️ Risk Factor {card_idx + 1}</div>
+	                            <div style="color: #172033; font-size: 1rem; font-weight: 700; line-height: 1.45;">
+	                                {factor_text_html}
+	                            </div>
                         </div>
                         """,
                         unsafe_allow_html=True,
                     )
 
             st.markdown("### 📝 Clinical Analysis")
-            st.info(report.get("risk_explanation", "No clinical analysis was returned."))
+            st.info(safe_text(report.get("risk_explanation", "No clinical analysis was returned.")))
 
             recommendations = report.get("recommendations", {})
             st.markdown("### Recommendations")
@@ -845,22 +865,22 @@ with tab3:
             if isinstance(lifestyle_items, str):
                 lifestyle_items = [lifestyle_items]
             for item in lifestyle_items:
-                st.markdown(f"- {item}")
+                st.markdown(f"- {safe_text(item)}")
 
             st.markdown("#### 💊 Medication Note")
-            st.warning(recommendations.get("medication_note", "No medication note was returned."))
+            st.warning(safe_text(recommendations.get("medication_note", "No medication note was returned.")))
 
             st.markdown("#### 📅 Follow-up")
-            st.success(recommendations.get("follow_up", "No follow-up guidance was returned."))
+            st.success(safe_text(recommendations.get("follow_up", "No follow-up guidance was returned.")))
 
             with st.expander("📚 Medical Guideline Sources Used", expanded=False):
                 sources = report.get("guideline_sources", [])
                 if isinstance(sources, str):
                     sources = [sources]
                 for source in sources:
-                    st.markdown(f"📖 {source}")
+                    st.markdown(f"📖 {safe_text(source)}")
 
-            st.error(report.get("disclaimer", "This AI report is educational and is not a substitute for professional medical advice."))
+            st.error(safe_text(report.get("disclaimer", "This AI report is educational and is not a substitute for professional medical advice.")))
 
             pdf_bytes = create_health_report_pdf(report, selected_patient_idx + 1)
             st.download_button(
