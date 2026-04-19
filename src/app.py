@@ -3,7 +3,7 @@ from pathlib import Path
 
 # Ensure Python always finds model.py and preprocess.py in the same src/ folder,
 # even when the app is launched from outside the src/ directory.
-SRC_DIR  = Path(__file__).resolve().parent
+SRC_DIR = Path(__file__).resolve().parent
 BASE_DIR = SRC_DIR.parent
 if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
@@ -13,211 +13,335 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
-import joblib
-from sklearn.metrics import confusion_matrix
+from sklearn.metrics import confusion_matrix, f1_score
 
 # Import our custom preprocessing and evaluation functions
 from preprocess import preprocess_uploaded_data
 from model import evaluate_dataset
 
-# ─────────────────────────────────────────────────────────────────────────────
-# PAGE CONFIGURATION — must be the very first Streamlit call
-# ─────────────────────────────────────────────────────────────────────────────
+# ---------------------------------------------------------------------------
+# PAGE CONFIGURATION - must be the very first Streamlit call
+# ---------------------------------------------------------------------------
 st.set_page_config(
     page_title="Patient Risk Assessment System",
     page_icon="🏥",
     layout="wide",
 )
 
-# ─────────────────────────────────────────────────────────────────────────────
-# CUSTOM CSS — polishes the look of the app
-# ─────────────────────────────────────────────────────────────────────────────
+# ---------------------------------------------------------------------------
+# CUSTOM CSS
+# ---------------------------------------------------------------------------
 st.markdown(
     """
     <style>
-        .main-title  { font-size: 2.3rem; font-weight: 700; color: #1f3d6b; }
-        .subtitle    { font-size: 1.05rem; color: #555; margin-bottom: 1rem; }
-        .metric-card { background: #f0f4ff; border-radius: 10px; padding: 12px; text-align: center; }
+        :root {
+            --primary-blue: #1a73e8;
+            --deep-text: #172033;
+            --muted-text: #5f6b7a;
+            --soft-border: #e5eaf1;
+            --card-bg: #ffffff;
+        }
+
+        .stApp {
+            background: #ffffff;
+            color: var(--deep-text);
+        }
+
+        section[data-testid="stSidebar"] {
+            background: #f8fbff;
+            border-right: 1px solid var(--soft-border);
+        }
+
+        .main .block-container {
+            padding-top: 1.5rem;
+            padding-bottom: 2.5rem;
+        }
+
+        .app-header {
+            border-left: 6px solid var(--primary-blue);
+            padding: 1rem 1.2rem;
+            margin-bottom: 1.2rem;
+            background: linear-gradient(90deg, #f7fbff 0%, #ffffff 100%);
+            box-shadow: 0 8px 24px rgba(26, 115, 232, 0.10);
+        }
+
+        .main-title {
+            margin: 0;
+            color: var(--deep-text);
+            font-size: 2.25rem;
+            font-weight: 800;
+            letter-spacing: 0;
+            line-height: 1.2;
+        }
+
+        .subtitle {
+            margin: 0.35rem 0 0;
+            color: var(--muted-text);
+            font-size: 1rem;
+            line-height: 1.5;
+        }
+
+        .section-card {
+            background: var(--card-bg);
+            border: 1px solid var(--soft-border);
+            border-radius: 8px;
+            padding: 1rem;
+            box-shadow: 0 8px 22px rgba(23, 32, 51, 0.08);
+            margin-bottom: 1rem;
+        }
+
+        .metric-card {
+            background: var(--card-bg);
+            border: 1px solid var(--soft-border);
+            border-top: 4px solid var(--primary-blue);
+            border-radius: 8px;
+            padding: 1rem;
+            min-height: 116px;
+            box-shadow: 0 8px 22px rgba(23, 32, 51, 0.08);
+        }
+
+        .metric-label {
+            color: var(--muted-text);
+            font-size: 0.88rem;
+            font-weight: 700;
+            margin-bottom: 0.35rem;
+        }
+
+        .metric-value {
+            color: var(--deep-text);
+            font-size: 1.75rem;
+            font-weight: 800;
+            line-height: 1.2;
+        }
+
+        .metric-caption {
+            color: var(--muted-text);
+            font-size: 0.78rem;
+            margin-top: 0.35rem;
+        }
+
+        .sidebar-title {
+            color: var(--deep-text);
+            font-size: 1.25rem;
+            font-weight: 800;
+            margin-bottom: 0.25rem;
+        }
+
+        .sidebar-note {
+            color: var(--muted-text);
+            font-size: 0.88rem;
+            line-height: 1.45;
+        }
+
+        div[data-testid="stTabs"] button {
+            font-weight: 700;
+        }
+
+        div[data-testid="stDownloadButton"] button,
+        div[data-testid="stButton"] button {
+            border-radius: 8px;
+            border: 1px solid var(--primary-blue);
+        }
+
+        div[data-testid="stDataFrame"] {
+            border: 1px solid var(--soft-border);
+            border-radius: 8px;
+            box-shadow: 0 8px 22px rgba(23, 32, 51, 0.06);
+        }
     </style>
     """,
     unsafe_allow_html=True,
 )
 
-# ─────────────────────────────────────────────────────────────────────────────
-# HEADER SECTION
-# ─────────────────────────────────────────────────────────────────────────────
-st.markdown('<p class="main-title">🏥 Intelligent Patient Risk Assessment System</p>', unsafe_allow_html=True)
+REQUIRED_COLUMNS = [
+    "Pregnancies",
+    "Glucose",
+    "BloodPressure",
+    "SkinThickness",
+    "Insulin",
+    "BMI",
+    "DiabetesPedigreeFunction",
+    "Age",
+]
+
+INVALID_FILE_MESSAGE = (
+    "❌ Bundled dataset configuration error. The selected dataset must contain "
+    "these 8 columns: Pregnancies, Glucose, BloodPressure, SkinThickness, "
+    "Insulin, BMI, DiabetesPedigreeFunction, Age."
+)
+
+
+def metric_card(label, value, caption=""):
+    st.markdown(
+        f"""
+        <div class="metric-card">
+            <div class="metric-label">{label}</div>
+            <div class="metric-value">{value}</div>
+            <div class="metric-caption">{caption}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def risk_level(probability):
+    if probability >= 0.7:
+        return "🔴 High"
+    if probability >= 0.4:
+        return "🟡 Medium"
+    return "🟢 Low"
+
+
+def validate_required_columns(df):
+    return all(column in df.columns for column in REQUIRED_COLUMNS)
+
+
+def build_predictions(raw_df):
+    X_scaled, y_true = preprocess_uploaded_data(raw_df)
+    results = evaluate_dataset(X_scaled, y_true)
+
+    output_df = raw_df.copy().reset_index(drop=True)
+    output_df["Prediction"] = [
+        "🔴 Diabetes Risk" if prediction == 1 else "🟢 No Diabetes"
+        for prediction in results["predictions"]
+    ]
+    probabilities = results["probabilities"]
+    output_df["Risk Probability %"] = (probabilities * 100).round(1)
+    output_df["Confidence"] = [
+        f"{(prob if prob >= 0.5 else 1 - prob) * 100:.1f}%"
+        for prob in probabilities
+    ]
+    output_df["Risk Level"] = [risk_level(prob) for prob in probabilities]
+
+    risk_summary = {
+        "Total Patients": len(output_df),
+        "High Risk": int((output_df["Risk Level"] == "🔴 High").sum()),
+        "Medium Risk": int((output_df["Risk Level"] == "🟡 Medium").sum()),
+        "Low Risk": int((output_df["Risk Level"] == "🟢 Low").sum()),
+    }
+
+    return output_df, risk_summary, results, y_true
+
+
+def style_risk_badges(df):
+    def style_risk_column(value):
+        if value == "🔴 High":
+            return "background-color: #fde7e9; color: #b42318; font-weight: 700;"
+        if value == "🟡 Medium":
+            return "background-color: #fff4d6; color: #8a5a00; font-weight: 700;"
+        if value == "🟢 Low":
+            return "background-color: #e7f6ec; color: #0f7b3f; font-weight: 700;"
+        return ""
+
+    return df.style.map(style_risk_column, subset=["Risk Level"])
+
+
+def render_glucose_distribution(df):
+    fig, ax = plt.subplots(figsize=(7, 4))
+    ax.hist(df["Glucose"], bins=20, color="#1a73e8", edgecolor="white")
+    ax.set_title("Glucose Distribution", fontsize=13, fontweight="bold")
+    ax.set_xlabel("Glucose")
+    ax.set_ylabel("Frequency")
+    ax.grid(axis="y", alpha=0.18)
+    plt.tight_layout()
+    st.pyplot(fig, use_container_width=True)
+    plt.close(fig)
+
+
+def render_bmi_distribution(df):
+    fig, ax = plt.subplots(figsize=(7, 4))
+    ax.hist(df["BMI"], bins=20, color="#34a853", edgecolor="white")
+    ax.set_title("BMI Distribution", fontsize=13, fontweight="bold")
+    ax.set_xlabel("BMI")
+    ax.set_ylabel("Frequency")
+    ax.grid(axis="y", alpha=0.18)
+    plt.tight_layout()
+    st.pyplot(fig, use_container_width=True)
+    plt.close(fig)
+
+
+# ---------------------------------------------------------------------------
+# HEADER
+# ---------------------------------------------------------------------------
 st.markdown(
-    '<p class="subtitle">Upload patient data or use a sample dataset to assess diabetes risk.</p>',
+    """
+    <div class="app-header">
+        <h1 class="main-title">🏥 Intelligent Patient Risk Assessment System</h1>
+        <p class="subtitle">
+            Professional diabetes risk screening with model diagnostics,
+            patient-level predictions, and an AI analysis workspace.
+        </p>
+    </div>
+    """,
     unsafe_allow_html=True,
 )
+
 st.warning(
     "⚠️ **Disclaimer:** This tool is for educational purposes only and is not a "
     "substitute for professional medical advice. Always consult a qualified healthcare provider."
 )
 
-# ─────────────────────────────────────────────────────────────────────────────
-# STEP 1 — SIDEBAR: DATA SOURCE SELECTION
-# The user can upload their own CSV/XLSX or pick one of the built-in samples.
-# ─────────────────────────────────────────────────────────────────────────────
+# ---------------------------------------------------------------------------
+# SIDEBAR
+# ---------------------------------------------------------------------------
 with st.sidebar:
-    st.header("� Data Source")
+    st.markdown('<div class="sidebar-title">🏥 Patient Risk AI</div>', unsafe_allow_html=True)
 
     data_source = st.radio(
-        "Choose how to load patient data:",
+        "Data source",
         options=[
-            "📤 Upload my own dataset (CSV or XLSX)",
-            "🔴 Use Sample: High Risk Patients",
-            "🟢 Use Sample: Low Risk Patients",
+            "🔴 High Risk Sample (20 patients)",
+            "🟢 Low Risk Sample (20 patients)",
         ],
     )
 
-    raw_df = None  # will hold the loaded DataFrame
-
-    if data_source == "📤 Upload my own dataset (CSV or XLSX)":
-        uploaded_file = st.file_uploader(
-            "Upload a CSV or Excel file",
-            type=["csv", "xlsx"],
-            help="File must contain: Pregnancies, Glucose, BloodPressure, "
-                 "SkinThickness, Insulin, BMI, DiabetesPedigreeFunction, Age",
-        )
-        if uploaded_file is not None:
-            if uploaded_file.name.endswith(".xlsx"):
-                raw_df = pd.read_excel(uploaded_file, engine="openpyxl")
-            else:
-                raw_df = pd.read_csv(uploaded_file)
-            st.success(f"✅ Loaded **{uploaded_file.name}** — {len(raw_df)} rows")
-
-    elif data_source == "🔴 Use Sample: High Risk Patients":
-        raw_df = pd.read_csv(BASE_DIR / "data" / "sample_high_risk.csv")
-        st.success(f"✅ Loaded sample_high_risk.csv — {len(raw_df)} rows")
-
-    else:  # Low Risk sample
-        raw_df = pd.read_csv(BASE_DIR / "data" / "sample_low_risk.csv")
-        st.success(f"✅ Loaded sample_low_risk.csv — {len(raw_df)} rows")
-
-# If no data has been loaded yet, prompt the user and halt execution
-if raw_df is None:
-    st.info("👈 Please select a data source from the sidebar to begin.")
-    st.stop()
-
-# ─────────────────────────────────────────────────────────────────────────────
-# STEP 2 — PREPROCESS & PREDICT
-# Validate columns, clean data, scale features, then run batch inference.
-# ─────────────────────────────────────────────────────────────────────────────
-try:
-    X_scaled, y_true = preprocess_uploaded_data(raw_df)
-except ValueError as ve:
-    # Raised when required columns are missing
-    st.error(f"❌ **Column validation failed:** {ve}")
-    st.stop()
-except Exception as e:
-    st.error(f"❌ An unexpected error occurred: {e}")
-    st.stop()
-
-# Run batch predictions and compute metrics (if Outcome column is present)
-results = evaluate_dataset(X_scaled, y_true)
-
-# ── Build the output DataFrame ─────────────────────────────────────────────
-output_df = raw_df.copy().reset_index(drop=True)
-
-# Map numeric predictions to readable labels
-output_df["Prediction"] = [
-    "🔴 Diabetes Risk" if p == 1 else "✅ No Diabetes"
-    for p in results["predictions"]
-]
-
-# Probability as a percentage rounded to 1 decimal place
-probs = results["probabilities"]
-output_df["Risk Probability %"] = (probs * 100).round(1)
-
-# Confidence = how certain the model is, regardless of which class it picked
-output_df["Confidence"] = [
-    f"{(p if p >= 0.5 else 1 - p) * 100:.1f}%"
-    for p in probs
-]
-
-# Risk tier based on probability threshold
-def risk_level(p):
-    if p >= 0.7:
-        return "High"
-    elif p >= 0.4:
-        return "Medium"
-    else:
-        return "Low"
-
-output_df["Risk Level"] = [risk_level(p) for p in probs]
-
-# ─────────────────────────────────────────────────────────────────────────────
-# STEP 3 — THREE-TAB LAYOUT
-# ─────────────────────────────────────────────────────────────────────────────
-tab1, tab2, tab3 = st.tabs([
-    "📋 Predictions & Risk Assessment",
-    "📊 Model Evaluation Metrics",
-    "📈 Trend Insights",
-])
-
-# ══════════════════════════════════════════════════════════════════════════════
-# TAB 1 — Predictions & Risk Assessment
-# ══════════════════════════════════════════════════════════════════════════════
-with tab1:
-    st.subheader("Patient-Level Risk Predictions")
-
-    # ── Summary metrics row ──────────────────────────────────────────────────
-    total      = len(output_df)
-    high_count = (output_df["Risk Level"] == "High").sum()
-    med_count  = (output_df["Risk Level"] == "Medium").sum()
-    low_count  = (output_df["Risk Level"] == "Low").sum()
-
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("👥 Total Patients",  total)
-    c2.metric("🔴 High Risk",       high_count)
-    c3.metric("🟡 Medium Risk",     med_count)
-    c4.metric("🟢 Low Risk",        low_count)
-
-    st.markdown("---")
-
-    # ── Raw input data expander ───────────────────────────────────────────────
-    with st.expander("📄 View Raw Input Data", expanded=False):
-        st.dataframe(raw_df, use_container_width=True)
-
-    # ── Full results table ────────────────────────────────────────────────────
-    st.markdown("#### 🗂️ Full Prediction Results")
-    display_cols = [
-        "Pregnancies", "Glucose", "BMI", "Age",
-        "Prediction", "Risk Probability %", "Confidence", "Risk Level",
-    ]
-    st.dataframe(output_df[display_cols], use_container_width=True)
-
-    # ── Download button ───────────────────────────────────────────────────────
-    csv_bytes = output_df.to_csv(index=False).encode("utf-8")
-    st.download_button(
-        label="⬇️ Download Results as CSV",
-        data=csv_bytes,
-        file_name="risk_assessment_results.csv",
-        mime="text/csv",
+    st.markdown("**About**")
+    st.markdown(
+        '<div class="sidebar-note">This app evaluates preloaded clinical sample datasets with a trained diabetes risk model.</div>',
+        unsafe_allow_html=True,
     )
 
-# ══════════════════════════════════════════════════════════════════════════════
-# TAB 2 — Model Evaluation Metrics
-# ══════════════════════════════════════════════════════════════════════════════
-with tab2:
-    st.subheader("Model Performance Evaluation")
+# ---------------------------------------------------------------------------
+# TABS
+# ---------------------------------------------------------------------------
+tab1, tab2, tab3 = st.tabs(
+    [
+        "📊 Model Dashboard",
+        "🔍 Patient Predictions",
+        "🤖 Agentic Analysis",
+    ]
+)
 
-    if results["metrics_available"]:
-        # ── Four metric cards ─────────────────────────────────────────────────
-        m1, m2, m3, m4 = st.columns(4)
-        m1.metric("✅ Accuracy",   f"{results['accuracy'] * 100:.2f}%")
-        m2.metric("📉 RMSE",       f"{results['rmse']:.4f}")
-        m3.metric("📐 MAE",        f"{results['mae']:.4f}")
-        m4.metric("📈 R² Score",   f"{results['r2']:.4f}")
+# ---------------------------------------------------------------------------
+# TAB 1 - MODEL DASHBOARD
+# ---------------------------------------------------------------------------
+with tab1:
+    st.subheader("Model Dashboard")
 
-        st.markdown("---")
+    with st.spinner("Processing model dashboard metrics..."):
+        dashboard_df = pd.read_csv(BASE_DIR / "data" / "diabetes.csv")
+        dashboard_X_scaled, dashboard_y_true = preprocess_uploaded_data(dashboard_df)
+        dashboard_results = evaluate_dataset(dashboard_X_scaled, dashboard_y_true)
+        dashboard_f1 = f1_score(dashboard_y_true, dashboard_results["predictions"])
 
-        # ── Confusion matrix heatmap ──────────────────────────────────────────
-        st.markdown("#### Confusion Matrix")
-        cm = confusion_matrix(y_true, results["predictions"])
-        fig, ax = plt.subplots(figsize=(5, 4))
+    if dashboard_results["metrics_available"]:
+        metric_cols = st.columns(4)
+        with metric_cols[0]:
+            metric_card("Accuracy", f"{dashboard_results['accuracy'] * 100:.2f}%", "Correct classifications")
+        with metric_cols[1]:
+            metric_card("F1", f"{dashboard_f1:.4f}", "Balance of precision and recall")
+        with metric_cols[2]:
+            metric_card("RMSE", f"{dashboard_results['rmse']:.4f}", "Root mean square error")
+        with metric_cols[3]:
+            metric_card("MAE", f"{dashboard_results['mae']:.4f}", "Mean absolute error")
+
+        metric_cols = st.columns(4)
+        with metric_cols[0]:
+            metric_card("R²", f"{dashboard_results['r2']:.4f}", "Variance explained")
+
+        st.markdown("### Confusion Matrix")
+        fig, ax = plt.subplots(figsize=(6, 4.5))
+        cm = confusion_matrix(dashboard_y_true, dashboard_results["predictions"])
         sns.heatmap(
             cm,
             annot=True,
@@ -228,123 +352,295 @@ with tab2:
             linewidths=0.5,
             ax=ax,
         )
-        ax.set_xlabel("Predicted", fontsize=11)
-        ax.set_ylabel("Actual", fontsize=11)
+        ax.set_xlabel("Predicted")
+        ax.set_ylabel("Actual")
         ax.set_title("Confusion Matrix", fontsize=13, fontweight="bold")
         plt.tight_layout()
-        st.pyplot(fig)
+        st.pyplot(fig, use_container_width=True)
         plt.close(fig)
 
-        # ── Metric explanations ───────────────────────────────────────────────
-        with st.expander("ℹ️ What do these metrics mean?", expanded=False):
-            st.markdown(
-                """
-**✅ Accuracy**
-The percentage of patients whose diabetes status was correctly predicted.
-For example, 75% accuracy means the model got 3 out of every 4 patients right.
-However, accuracy alone can be misleading if the data is imbalanced — that's why we also look at RMSE, MAE, and R².
-
-**📉 RMSE (Root Mean Square Error)**
-RMSE measures how far off the model's predictions are from the true labels, on average — but it penalises large errors more than small ones.
-A lower RMSE indicates better, more consistent predictions.
-Since our labels are binary (0 or 1), an RMSE close to 0 is ideal.
-
-**📐 MAE (Mean Absolute Error)**
-MAE is the average absolute difference between predicted and actual values.
-It is easier to interpret than RMSE because it is in the same units as the target.
-For this binary task, an MAE of 0.25 means the model is off by 0.25 on average per prediction.
-
-**📈 R² Score (Coefficient of Determination)**
-R² tells us how much of the variation in the Outcome the model can explain.
-A score of 1.0 means perfect prediction; a score of 0.0 means the model is no better than guessing the mean.
-Negative values indicate that a simple average would outperform the model.
-                """
-            )
-
+        st.markdown("### Feature Insights")
+        chart_col1, chart_col2 = st.columns(2)
+        with chart_col1:
+            st.markdown('<div class="section-card">', unsafe_allow_html=True)
+            render_glucose_distribution(dashboard_df)
+            st.markdown("</div>", unsafe_allow_html=True)
+        with chart_col2:
+            st.markdown('<div class="section-card">', unsafe_allow_html=True)
+            render_bmi_distribution(dashboard_df)
+            st.markdown("</div>", unsafe_allow_html=True)
     else:
-        # No Outcome column was found in the uploaded file
-        st.info(
-            "ℹ️ Your uploaded dataset does not have an **'Outcome'** column, so "
-            "evaluation metrics cannot be calculated. Predictions are still shown in Tab 1."
+        st.info("Model metrics are unavailable because the dashboard dataset has no Outcome column.")
+
+# ---------------------------------------------------------------------------
+# TAB 2 - PATIENT PREDICTIONS
+# ---------------------------------------------------------------------------
+with tab2:
+    st.subheader("Patient Predictions")
+
+    raw_df = None
+
+    if data_source == "🔴 High Risk Sample (20 patients)":
+        with st.spinner("Loading high risk sample data..."):
+            raw_df = pd.read_csv(BASE_DIR / "data" / "sample_high_risk.csv")
+    elif data_source == "🟢 Low Risk Sample (20 patients)":
+        with st.spinner("Loading low risk sample data..."):
+            raw_df = pd.read_csv(BASE_DIR / "data" / "sample_low_risk.csv")
+
+    if raw_df is not None:
+        if not validate_required_columns(raw_df):
+            st.error(INVALID_FILE_MESSAGE)
+            st.stop()
+
+        try:
+            with st.spinner("Running patient risk predictions..."):
+                output_df, risk_summary, _, _ = build_predictions(raw_df)
+        except Exception as exc:
+            st.error(f"❌ An unexpected error occurred while processing this data: {exc}")
+            st.stop()
+
+        st.session_state["predictions_df"] = output_df
+        st.session_state["risk_summary"] = risk_summary
+
+        stat_cols = st.columns(4)
+        with stat_cols[0]:
+            metric_card("Total Patients", risk_summary["Total Patients"], "Records processed")
+        with stat_cols[1]:
+            metric_card("High Risk", risk_summary["High Risk"], "Needs priority review")
+        with stat_cols[2]:
+            metric_card("Medium Risk", risk_summary["Medium Risk"], "Monitor closely")
+        with stat_cols[3]:
+            metric_card("Low Risk", risk_summary["Low Risk"], "Lower estimated risk")
+
+        st.markdown("### Full Results")
+        display_cols = [
+            "Pregnancies",
+            "Glucose",
+            "BloodPressure",
+            "SkinThickness",
+            "Insulin",
+            "BMI",
+            "DiabetesPedigreeFunction",
+            "Age",
+            "Prediction",
+            "Risk Probability %",
+            "Confidence",
+            "Risk Level",
+        ]
+        st.dataframe(
+            style_risk_badges(output_df[display_cols]),
+            use_container_width=True,
+            hide_index=True,
         )
 
-# ══════════════════════════════════════════════════════════════════════════════
-# TAB 3 — Trend Insights
-# ══════════════════════════════════════════════════════════════════════════════
+        with st.expander("Raw input data", expanded=False):
+            st.dataframe(raw_df, use_container_width=True, hide_index=True)
+
+        csv_bytes = output_df.to_csv(index=False).encode("utf-8")
+        st.download_button(
+            label="Download results as CSV",
+            data=csv_bytes,
+            file_name="risk_assessment_results.csv",
+            mime="text/csv",
+        )
+
+# ---------------------------------------------------------------------------
+# TAB 3 - AGENTIC ANALYSIS
+# ---------------------------------------------------------------------------
 with tab3:
-    st.subheader("Visual Trend Insights")
+    st.subheader("Agentic Analysis")
 
-    # ── Row 1: Prediction distribution | Risk Level distribution ─────────────
-    r1c1, r1c2 = st.columns(2)
+    import json
+    import os
 
-    with r1c1:
-        st.markdown("##### Prediction Distribution")
-        fig, ax = plt.subplots()
-        pred_counts = output_df["Prediction"].value_counts()
-        ax.bar(pred_counts.index, pred_counts.values, color=["#2ecc71", "#e74c3c"])
-        ax.set_title("Prediction Distribution")
-        ax.set_ylabel("Count")
-        ax.set_xlabel("Prediction")
-        plt.tight_layout()
-        st.pyplot(fig)
-        plt.close(fig)
+    predictions_df = st.session_state.get("predictions_df")
 
-    with r1c2:
-        st.markdown("##### Risk Level Distribution")
-        fig, ax = plt.subplots()
-        risk_counts = output_df["Risk Level"].value_counts()
-        colors = {"High": "#e74c3c", "Medium": "#f39c12", "Low": "#2ecc71"}
-        bar_colors = [colors.get(lvl, "#3498db") for lvl in risk_counts.index]
-        ax.bar(risk_counts.index, risk_counts.values, color=bar_colors)
-        ax.set_title("Risk Level Distribution")
-        ax.set_ylabel("Count")
-        ax.set_xlabel("Risk Level")
-        plt.tight_layout()
-        st.pyplot(fig)
-        plt.close(fig)
+    if predictions_df is None or predictions_df.empty:
+        st.warning(
+            "⚠️ No patient data loaded. Please go to the **Predictions tab** "
+            "and select a sample dataset first."
+        )
+        st.button("Go to Predictions Tab")
+    else:
+        groq_api_key = os.getenv("GROQ_API_KEY")
+        if not groq_api_key:
+            try:
+                groq_api_key = st.secrets.get("GROQ_API_KEY")
+            except Exception:
+                groq_api_key = None
 
-    st.markdown("---")
+        if not groq_api_key:
+            st.error(
+                "🔑 GROQ_API_KEY is not configured. Set it in your "
+                "environment or Streamlit secrets to enable AI analysis."
+            )
+            st.stop()
 
-    # ── Row 2: Glucose histogram | BMI histogram ──────────────────────────────
-    r2c1, r2c2 = st.columns(2)
+        try:
+            from agent import run_health_agent
+        except ImportError:
+            st.error("agent.py not found. Please complete Phase 3 first.")
+            st.stop()
 
-    with r2c1:
-        st.markdown("##### Glucose Distribution")
-        fig, ax = plt.subplots()
-        ax.hist(raw_df["Glucose"], bins=20, color="#3498db", edgecolor="white")
-        ax.set_title("Glucose Distribution")
-        ax.set_xlabel("Glucose (mg/dL)")
-        ax.set_ylabel("Frequency")
-        plt.tight_layout()
-        st.pyplot(fig)
-        plt.close(fig)
+        def format_probability(value):
+            try:
+                probability = float(value)
+            except (TypeError, ValueError):
+                return "N/A"
 
-    with r2c2:
-        st.markdown("##### BMI Distribution")
-        fig, ax = plt.subplots()
-        ax.hist(raw_df["BMI"], bins=20, color="#9b59b6", edgecolor="white")
-        ax.set_title("BMI Distribution")
-        ax.set_xlabel("BMI (kg/m²)")
-        ax.set_ylabel("Frequency")
-        plt.tight_layout()
-        st.pyplot(fig)
-        plt.close(fig)
+            if probability <= 1:
+                probability *= 100
+            return f"{probability:.0f}%"
 
-    st.markdown("---")
+        patient_labels = []
+        for patient_idx, patient_row in predictions_df.reset_index(drop=True).iterrows():
+            risk_level_label = patient_row.get("Risk Level", "Risk Unknown")
+            risk_probability_pct = format_probability(patient_row.get("Risk Probability %"))
+            patient_labels.append(
+                f"Patient {patient_idx + 1} — {risk_level_label} Risk ({risk_probability_pct})"
+            )
 
-    # ── Row 3: Full-width feature correlation heatmap ─────────────────────────
-    st.markdown("##### Feature Correlation Heatmap")
-    numeric_cols = raw_df.select_dtypes(include=[np.number])
-    fig, ax = plt.subplots(figsize=(10, 6))
-    sns.heatmap(
-        numeric_cols.corr(),
-        annot=True,
-        cmap="coolwarm",
-        fmt=".2f",
-        linewidths=0.5,
-        ax=ax,
-    )
-    ax.set_title("Feature Correlation Heatmap", fontsize=14, fontweight="bold")
-    plt.tight_layout()
-    st.pyplot(fig)
-    plt.close(fig)
+        default_idx = int(st.session_state.get("selected_patient_idx", 0))
+        if default_idx >= len(patient_labels):
+            default_idx = 0
+
+        selected_label = st.selectbox(
+            "Select a patient to analyse:",
+            options=patient_labels,
+            index=default_idx,
+        )
+        selected_patient_idx = patient_labels.index(selected_label)
+        if st.session_state.get("selected_patient_idx") != selected_patient_idx:
+            st.session_state.pop("agent_report", None)
+        st.session_state["selected_patient_idx"] = selected_patient_idx
+
+        selected_patient = predictions_df.reset_index(drop=True).iloc[selected_patient_idx]
+
+        with st.expander("📋 Clinical Input Values", expanded=False):
+            clinical_values = selected_patient[REQUIRED_COLUMNS].to_frame(name="Value")
+            st.dataframe(clinical_values, use_container_width=True)
+
+        _, button_col, _ = st.columns([1, 2, 1])
+        with button_col:
+            generate_report = st.button(
+                "🧠 Generate AI Health Report",
+                use_container_width=True,
+            )
+
+        if generate_report:
+            risk_probability_pct = float(selected_patient.get("Risk Probability %", 0))
+            patient_dict = {
+                "Pregnancies": selected_patient["Pregnancies"],
+                "Glucose": selected_patient["Glucose"],
+                "BloodPressure": selected_patient["BloodPressure"],
+                "SkinThickness": selected_patient["SkinThickness"],
+                "Insulin": selected_patient["Insulin"],
+                "BMI": selected_patient["BMI"],
+                "DiabetesPedigreeFunction": selected_patient["DiabetesPedigreeFunction"],
+                "Age": selected_patient["Age"],
+                "risk_probability": risk_probability_pct / 100,
+                "risk_level": selected_patient.get("Risk Level", "Unknown"),
+            }
+
+            try:
+                with st.spinner("🔍 Analysing patient risk profile..."):
+                    st.session_state["agent_report"] = run_health_agent(patient_dict)
+            except Exception as exc:
+                st.error(f"❌ Failed to generate AI health report: {exc}")
+
+        report = st.session_state.get("agent_report")
+        if report:
+            risk_level = report.get("risk_level", selected_patient.get("Risk Level", "Unknown"))
+            risk_probability_pct = report.get(
+                "risk_probability_pct",
+                format_probability(selected_patient.get("Risk Probability %")),
+            )
+            risk_level_text = str(risk_level)
+
+            if "High" in risk_level_text:
+                banner_bg = "#fde7e9"
+                banner_border = "#d93025"
+                banner_text = "#8c1d18"
+            elif "Medium" in risk_level_text:
+                banner_bg = "#fff4d6"
+                banner_border = "#fbbc04"
+                banner_text = "#7a4f00"
+            else:
+                banner_bg = "#e7f6ec"
+                banner_border = "#34a853"
+                banner_text = "#0b6b35"
+
+            st.markdown(
+                f"""
+                <div style="
+                    background: {banner_bg};
+                    border-left: 6px solid {banner_border};
+                    border-radius: 8px;
+                    padding: 1.1rem 1.25rem;
+                    margin: 1rem 0;
+                    color: {banner_text};
+                    box-shadow: 0 8px 22px rgba(23, 32, 51, 0.08);
+                ">
+                    <div style="font-size: 0.95rem; font-weight: 700;">Risk Assessment</div>
+                    <div style="font-size: 2rem; font-weight: 800; line-height: 1.2;">
+                        {risk_level_text} · {risk_probability_pct}
+                    </div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+
+            st.markdown("### Key Risk Factors")
+            risk_factors = report.get("key_risk_factors", report.get("risk_factors", []))
+            if isinstance(risk_factors, str):
+                risk_factors = [risk_factors]
+            factor_cols = st.columns(3)
+            for card_idx in range(3):
+                factor_text = risk_factors[card_idx] if card_idx < len(risk_factors) else "Not specified"
+                with factor_cols[card_idx]:
+                    st.markdown(
+                        f"""
+                        <div class="metric-card">
+                            <div class="metric-label">⚠️ Risk Factor {card_idx + 1}</div>
+                            <div style="color: #172033; font-size: 1rem; font-weight: 700; line-height: 1.45;">
+                                {factor_text}
+                            </div>
+                        </div>
+                        """,
+                        unsafe_allow_html=True,
+                    )
+
+            st.markdown("### 📝 Clinical Analysis")
+            st.info(report.get("risk_explanation", "No clinical analysis was returned."))
+
+            recommendations = report.get("recommendations", {})
+            st.markdown("### Recommendations")
+
+            st.markdown("#### 🥗 Lifestyle")
+            lifestyle_items = recommendations.get("lifestyle", [])
+            if isinstance(lifestyle_items, str):
+                lifestyle_items = [lifestyle_items]
+            for item in lifestyle_items:
+                st.markdown(f"- {item}")
+
+            st.markdown("#### 💊 Medication Note")
+            st.warning(recommendations.get("medication_note", "No medication note was returned."))
+
+            st.markdown("#### 📅 Follow-up")
+            st.success(recommendations.get("follow_up", "No follow-up guidance was returned."))
+
+            with st.expander("📚 Medical Guideline Sources Used", expanded=False):
+                sources = report.get("guideline_sources", [])
+                if isinstance(sources, str):
+                    sources = [sources]
+                for source in sources:
+                    st.markdown(f"📖 {source}")
+
+            st.error(report.get("disclaimer", "This AI report is educational and is not a substitute for professional medical advice."))
+
+            st.download_button(
+                "⬇️ Download Full Report (JSON)",
+                data=json.dumps(report, indent=2),
+                file_name=f"health_report_patient_{selected_patient_idx + 1}.json",
+                mime="application/json",
+            )
